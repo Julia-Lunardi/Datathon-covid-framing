@@ -1,0 +1,420 @@
+----
+title: "Project Report"
+author: "Julia Lunardi"
+date: "8/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This is a project developed at Aarhus COVID-19 Datathon 2021. In the datathon, 
+groups were created to explore different questions and datasets related to the
+Covid-19 pandemic in Denmark. The theme for the project at hand was formulated as
+**"Framing of the COVID-19 pandemic in Danish news media"**. 
+
+## The datasets
+ **Explanation derived from [Kenneth Enevoldsen](https://github.com/KennethEnevoldsen)** 
+
+The datasets primarily utilized are from a Danish newspaper derived dataset, derived from [Infomedia](Infomedia.dk), a proprietary Danish media archive. The organizers are not 
+allowed to share the text itself, so instead they kindly shared the inferred [LDA](https://en.wikipedia.org/wiki/Latent_Dirichlet_allocation) topic distributions 
+of each article in addition to the 10 most associated words within that topic.
+
+They trained two topic models: one on omnibus newspapers and one on tabloid
+newspapers as their reporting styles are different.According to Kenneth, a topic
+is essentailly a cluster of related words (that often appear together). Each article 
+is represented by a vector of 100 values (topics).This number of topics yielded marginally the highest [C_v topic coherence](https://radimrehurek.com/gensim/models/coherencemodel.html); although the parameter search was limited (models with 50, 100 and 150 topics were fitted on only the printed articles from both source types).
+
+Each value in the topic distribution of an article (100 values) corresponds to the probability of a topic appearing in a given article.  Topic probabilities range between 0 and 1 and each topic distribution/vector adds up to 1 (or very close to it). Topics are numbered from 0 to 99.
+See which words make the topics in the txt files.
+
+For more clarification, "In machine learning and natural language processing, a topic model is a type of statistical model for discovering the abstract "topics" that occur in a collection of documents. Topic modeling is a frequently used text-mining tool for discovery of hidden semantic structures in a text body. Intuitively, given that a document is about a particular topic, one would expect particular words to appear in the document more or less frequently (...)A document typically concerns multiple topics in different proportions; thus, in a document that is 10% about cats and 90% about dogs, there would probably be about 9 times more dog words than cat words. The "topics" produced by topic modeling techniques are clusters of similar words. A topic model captures this intuition in a mathematical framework, which allows examining a set of documents and discovering, based on the statistics of the words in each, what the topics might be and what each document's balance of topics is. Topic models are also referred to as probabilistic topic models, which refers to statistical algorithms for discovering the latent semantic structures of an extensive text body" (https://en.wikipedia.org/wiki/Topic_model)
+
+## Research questions
+
+The group started exploring the theme by visualizing omnibus data. The process of 
+creating, answering, and coming up with different questions is not a straight line, 
+and the list made available here is updated as the project develops.
+
+1. Is it possible to label the topic model data so as to extract relevant topics for study?
+2. Which omnibus vehicle discussed Covid-19 the most?
+3. What does the curve of Covid-19 articles through time look like?
+4. Was the prevalence of Covid-19 topics across time different for print and web media?
+5. Are the trends different for tabloid and omnibus media?
+6. Can Twitter provide insight into sentiments related to Covid-19?
+7. What was the prevalent sentiment in Danish Twitter regarding Covid-19?
+
+
+## Data Analysis
+
+### Loading packages
+
+```{r packages, results="hide", warning=FALSE, message=FALSE} 
+library(tidyverse)
+library(lubridate)
+library(plotly)
+```
+
+### Loading datasets
+```{r, results='hide', warning=FALSE, message=FALSE}
+omnibus <- read_csv("/Users/juliaabdalla/Desktop/Datathon/Infomedia/Omnibus/topics_omnibus.csv")
+
+tabloids <- read_csv("/Users/juliaabdalla/Desktop/Datathon/Infomedia/Tabloids/topics_tabloid.csv")
+```
+
+**Brief overview of the omnibus data, the first we worked with**
+
+```{r}
+head(omnibus)
+```
+
+To filter for topics that are only relevant to covid in the omnibus data, the group selected topics 6,22,24,30,37,41,52,70,83,88,91,92,96. These topics can be loosely labeled as:
+
+* 6 - vaccine
+* 22 - testing in denmark
+* 24 - lockdown
+* 30 - coronavirus
+* 37 - economy
+* 41 - mink crisis
+* 52 - infection monitoring
+* 70 - variants
+* 83 - 
+* 88 - testing 
+* 91 - covid deaths
+* 96 - 
+
+For the tabloid data, the topics were as follows:
+
+* 11- Stojbjerg scandal and mink
+* 28 - Coronavirus in Denmark
+* 37 - Denmarks approach to covid
+* 49 - Police and covid
+* 60 - Infection
+* 72 - Mask
+
+## 1 - Data wrangling
+
+### Select the 12 relevant topics from the omnibus dataset
+```{r}
+omnibus_covid_topics <- c(6,22, 24, 30, 37, 41, 52, 70, 83, 88, 91, 92, 96)
+omni_topics <-  paste0("topic_", omnibus_covid_topics)
+```
+
+
+
+```{r}
+tabloid_covid_topics <- c(11,28, 37, 49, 60, 72)
+tabl_topics <- paste0("topic_", tabloid_covid_topics)
+```
+
+
+## 2- Aggregating the data
+
+### 2.1 - for omnibus
+```{r}
+agg_omni <- omnibus %>% 
+  mutate(day = floor_date(date, "day")) %>% #rounds date down to day 
+  select(day, all_of(omni_topics)) %>%
+  group_by(day) %>% 
+  summarise(across(starts_with("topic_"), ~ mean(.x, na.rm = TRUE))) #calculates mean for every topic by day, yielding means for 417 days in total 
+
+agg_omni
+```
+
+### 2.2 for tabloids
+
+```{r}
+agg_tabl <- tabloids %>% 
+  mutate(day = floor_date(date, "day")) %>% #rounds date down to day 
+  select(day, all_of(tabl_topics)) %>%
+  group_by(day) %>% 
+  summarise(across(starts_with("topic_"), ~ mean(.x, na.rm = TRUE))) #calculates mean for every topic by day, yielding means for 417 days in total 
+
+agg_tabl
+```
+
+## 3 - Plotting the aggregated data
+
+### 3.1 - for omnibus
+```{r}
+agg_omni %>% 
+  mutate(covid = rowSums(across(starts_with("topic_")))) %>% #sums every row to a value that represents the measure of presence of covid-related topic each day 
+  ggplot(aes(day, covid)) +
+  geom_point(alpha = 0.5) +
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-03-13")), linetype = "dashed", color="red"))+ #marks the first lockdown
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-12-15")), linetype = "dashed" , color="red"))+ #marks the second lockdown
+  geom_smooth(span=0.15, color = "steelblue") + 
+  theme_minimal() + 
+  labs(y = "Prevalance of COVID19 in Omnibus media", x = "Date")
+```
+
+### 3.2 for tabloids
+```{r}
+agg_tabl %>% 
+  mutate(covid = rowSums(across(starts_with("topic_")))) %>% #sums every row to a value that represents the measure of presence of covid-related topic each day 
+  ggplot(aes(day, covid)) +
+  geom_point(alpha = 0.5) +
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-03-13")), linetype = "dashed", color="red"))+ #marks the first lockdown
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-12-15")), linetype = "dashed" , color="red"))+ #marks the second lockdown
+  geom_smooth(span=0.15, color = "steelblue") + 
+  theme_minimal() + 
+  labs(y = "Prevalance of COVID19 in Tabloid media", x = "Date")
+```
+
+
+
+## 4. Omnibus - plotting by media source 
+
+```{r }
+omni_by_sourcename <- omnibus %>% 
+  mutate(day = floor_date(date, "day")) %>% #rounds date down to day 
+  select(day, source_name, all_of(omni_topics)) %>%
+  group_by(day, source_name) %>% 
+  summarise(across(starts_with("topic_"), ~ mean(.x, na.rm = TRUE))) #calculates mean for every topic by day, yielding means for 417 days in total 
+
+```
+
+```{r}
+omni_by_sourcename %>% 
+  mutate(covid = rowSums(across(starts_with("topic_")))) %>% #sums every row to a value that represents the measure of presence of covid-related topic each day 
+  ggplot(aes(day, covid)) +
+  facet_wrap(~source_name, scales = "free")+
+  geom_point(alpha = 0.5) +
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-03-13")), linetype = "dashed", color="red"))+ #marks the first lockdown
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-12-15")), linetype = "dashed" , color="red"))+ #marks the second lockdown
+  geom_smooth(span=0.15, color = "steelblue") + 
+  theme_minimal() + 
+  labs(y = "Prevalance of COVID19 in Omnibus media", x = "Date") 
+```
+
+ ## 5. Omnibus - Plotting by type of media (print or web) 
+```{r}
+omni_by_sourcetype <- omnibus %>% 
+  mutate(day = floor_date(date, "day")) %>% #rounds date down to day 
+  select(day, source_type, all_of(omni_topics)) %>%
+  group_by(day, source_type) %>% 
+  summarise(across(starts_with("topic_"), ~ mean(.x, na.rm = TRUE))) #calculates mean for every topic by day, yielding means for 417 days in total 
+
+```
+
+
+```{r}
+omni_by_sourcetype %>% 
+  mutate(covid = rowSums(across(starts_with("topic_")))) %>% #sums every row to a value that represents the measure of presence of covid-related topic each day 
+  ggplot(aes(day, covid)) +
+  facet_wrap(~source_type, scales = "free")+
+  geom_point(alpha = 0.5) +
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-03-13")), linetype = "dashed", color="red"))+ #marks the first lockdown
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-12-15")), linetype = "dashed" , color="red"))+ #marks the second lockdown
+  geom_smooth(span=0.15, color = "steelblue") + 
+  theme_minimal() + 
+  labs(y = "Prevalance of COVID19 in Omnibus media", x = "Date") 
+```
+
+## 6. Tabloids plotting by media source
+
+```{r}
+tabl_by_sourcename <- tabloids %>% 
+  mutate(day = floor_date(date, "day")) %>% #rounds date down to day 
+  select(day, source_name, all_of(omni_topics)) %>%
+  group_by(day, source_name) %>% 
+  summarise(across(starts_with("topic_"), ~ mean(.x, na.rm = TRUE))) #calculates mean for every topic by day, yielding means for 417 days in total 
+
+```
+
+```{r}
+tabl_by_sourcename %>% 
+  mutate(covid = rowSums(across(starts_with("topic_")))) %>% #sums every row to a value that represents the measure of presence of covid-related topic each day 
+  ggplot(aes(day, covid)) +
+  facet_wrap(~source_name, scales = "free")+
+  geom_point(alpha = 0.5) +
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-03-13")), linetype = "dashed", color="red"))+ #marks the first lockdown
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-12-15")), linetype = "dashed" , color="red"))+ #marks the second lockdown
+  geom_smooth(span=0.15, color = "steelblue") + 
+  theme_minimal() + 
+  labs(y = "Prevalance of COVID19 in Tabloid media", x = "Date") 
+```
+
+
+
+## 7. Tabloids plotting by media type
+
+```{r}
+tabl_by_sourcetype <- tabloids %>% 
+  mutate(day = floor_date(date, "day")) %>% #rounds date down to day 
+  select(day, source_type, all_of(omni_topics)) %>%
+  group_by(day, source_type) %>% 
+  summarise(across(starts_with("topic_"), ~ mean(.x, na.rm = TRUE))) #calculates mean for every topic by day, yielding means for 417 days in total 
+
+```
+
+```{r}
+tabl_by_sourcetype %>% 
+  mutate(covid = rowSums(across(starts_with("topic_")))) %>% #sums every row to a value that represents the measure of presence of covid-related topic each day 
+  ggplot(aes(day, covid)) +
+  facet_wrap(~source_type, scales = "free")+
+  geom_point(alpha = 0.5) +
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-03-13")), color="red", linetype = "dashed"))+ #marks the first lockdown
+  geom_vline(aes(xintercept = as.integer(as.POSIXct("2020-12-15")), color="red",linetype = "dashed" ))+ #marks the second lockdown
+  geom_smooth(span=0.15, color = "steelblue") + 
+  theme_minimal() + 
+  labs(y = "Prevalance of COVID19 in Tabloid media", x = "Date") 
+```
+
+Despite yielding interesting plots, during the development of the project, it was observed
+that there was a bug with the topic data. For example, if we plot the topic prevalence through time, 
+many of the curves look the same: 
+
+```{r}
+omnibus %>% 
+  mutate(day = floor_date(date, "week")) %>% 
+  select(day, all_of(omni_topics)) %>% 
+  group_by(day, across(all_of(omni_topics))) %>% 
+  summarise(across(starts_with("topic_"), ~ mean(.x, na.rm = TRUE))) %>%
+  ungroup() %>% 
+  mutate(across(starts_with("topic_"),  ~ scale(.x)[,1])) %>% 
+  pivot_longer(cols = starts_with("topic")) %>% 
+   ggplot(aes(day, value)) +
+  # geom_line(alpha = 0.1) +
+  geom_smooth(span=0.15) + 
+  theme_minimal() + 
+  facet_wrap(~name) + 
+  labs(y = "Topic Prevalance in omnibus", x = "Date")
+```
+
+Furthermore, creating a proportion graph of covid related and non-covid related topics in the omnibus data aggregated over every month clearly shows a static proportion through time, which is highly unlikely to be the case.
+
+```{r}
+proportion_graph <- omnibus %>% 
+  select(-c(source_name, source_type)) %>% 
+  mutate(date = floor_date(date, "month")) %>% 
+  gather(-date, key = topic, value = probability) %>% 
+  mutate(corona_yes_no = ifelse(topic %in% omni_topics, 1, 0))
+```
+
+```{r}
+proportion_graph_counted <- proportion_graph %>% 
+  group_by(date) %>% 
+  count(corona_yes_no) %>%
+  ggplot(aes(x = corona_yes_no, y=date)) +
+  geom_histogram()
+```
+
+
+## Twitter data
+
+The group also worked with Twitter data, whereby it is possible to analyze the sentiment
+of tweets in the range of time studied. The models utilized are described below: 
+
+### DaVader
+The first model is the sentiment model DaVader (read more on https://spacy.io/models/da#da_core_news_lg). DaVader is a Danish Sentiment model developed using Vader and the dictionary lists from SentiDa and AFINN. This adaption is developed by Center for Humanities Computing Aarhus and Kenneth Enevoldsen.
+It predicts the degree to which a text is neutral, negative and positive. 
+It also calculates a compound score as a combination of the other score. Read more on the scoring here:
+https://github.com/cjhutto/vaderSentiment?fbclid=IwAR2yZfybopQQXO2PaFp1J_leP4dtgSAed-kBWrJdNau6AvvJwCSEIXXceEU#about-the-scoring 
+
+The columns associated with the DaVader sentiment scores are
+- "Sentiment_compound", the combined score 
+- "Sentiment_neutral", predicted degree of neutrality
+- "Sentiment_negative", predicted degree of negativity
+- "Sentiment_positive", predicted degree of positivity
+
+### BERT subjectivity 
+The BERT Tone subjectivity model is a model that predicts whether a text is subjective or not.
+It also gives the calculated probability of that prediction. Read more on the BERT Tone model here: 
+https://github.com/alexandrainst/danlp/blob/master/docs/docs/tasks/sentiment_analysis.md#bert-tone
+
+The columns associated with the BERT Tone subjetivity model are
+- "Bert_subj_label", the predicted label (binary, either "objective" or "subjective")
+- "Bert_subj_prob", the calculated probability of the predicted label (number between 0 and 1)
+
+### BERT emotion
+The BERT Emotion model is a combination of two models;
+- 1) predicting whether a text is emotional or not along with probability for that label, and
+- 2) predicting emotion in question along with probability for that emotion
+You can also read more on the BERT Emotion model here:
+https://github.com/alexandrainst/danlp/blob/master/docs/docs/tasks/sentiment_analysis.md#bert-tone
+
+The columns associated with the BERT Emotion model are:
+- "Bert_emo_laden", predicted emotionality (binary, either "Emotional" or "No emotion")
+- "Bert_emo_laden_prob", the calculated probability of predicted emotionality (number between 0 and 1)
+- "Bert_emo_emotion", the predicted emotion in case of emotional text. If the text is predicted to be non-emotional, the value is NaN. 
+- "Bert_emo_emotion_prob", a list containing 8 probabilities between 0 and 1. It is in the format of a string, where every probability is seperated by a space.
+
+The 8 possible emotions are "glæde/sindsro", "forventning/interesse", "tillid/accept", "overraskelse/forundring", "vrede/irritation", "foragt/modvilje", "sorg/skuffelse", "frygt/bekymring". 
+The 8 probabilities refer to the probabilities for each of these emotions in the order as listed here. 
+
+
+## 1. Loading the data 
+
+```{r, results = "hide", warning=FALSE, message=FALSE}
+sent <- read_csv("/Users/juliaabdalla/Desktop/Datathon/Sentiment analysis/agg_sentiment_twitter1.csv")
+```
+
+```{r}
+colnames(sent)
+
+sent$Date = as.POSIXct(sent$Date)
+```
+
+```{r}
+p <- sent %>% 
+  filter(Date >= as.POSIXct(ymd("2020-08-08"))) %>%
+  mutate(across(starts_with("Bert_emo_emotion"),  ~ scale(.x)[,1])) %>% #the predicted emotion in case of emotional text
+  pivot_longer(starts_with("Bert_emo_emotion")) %>% 
+  ggplot(aes(Date, value/n)) +  
+    geom_line() + 
+  facet_wrap(~name) + 
+    geom_vline(xintercept = as.POSIXct(ymd("2020-02-11")), color = "red", linetype="dashed") +
+    geom_vline(xintercept = as.POSIXct(ymd("2020-12-16")), color = "red", linetype="dashed") +
+      geom_vline(xintercept = as.POSIXct(ymd("2020-11-04")), color = "blue", linetype="dashed") + 
+        geom_vline(xintercept = as.POSIXct(ymd("2020-12-24")), color = "firebrick", linetype="dashed") +
+          geom_vline(xintercept = as.POSIXct(ymd("2020-12-31")), color = "pink", linetype="dashed") +
+            geom_vline(xintercept = as.POSIXct(ymd("2021-06-21")), color = "white", linetype="dashed") +
+              geom_vline(xintercept = as.POSIXct(ymd("2021-06-12")), color = "lightsteelblue", linetype="dashed") +
+                geom_vline(xintercept = as.POSIXct(ymd("2021-04-04")), color = "black", linetype="dashed") 
+  # annotate("text", label = "lockdown, christimas, new year", x = as.POSIXct(ymd("2020-12-31")), y=-0.0001)
+```
+
+## 2. Plotting emotions by date
+```{r}
+ggplotly(p)
+```
+
+Key dates to observe are the lockdown dates (13-03-2020 and 15-12-2020). 
+
+## 3. Plotting subjective and objective tweets by date
+```{r}
+p2 <- sent %>% 
+  pivot_longer(starts_with("Bert_subj_")) %>% 
+  filter(name != "Bert_emo_emotion_nan") %>% 
+  ggplot(aes(Date, value/n, color=name)) +  
+    geom_line() + 
+    geom_vline(xintercept = as.POSIXct(ymd("2020-02-11")), color = "red", linetype="dashed") +
+    geom_vline(xintercept = as.POSIXct(ymd("2020-12-16")), color = "red", linetype="dashed") 
+
+ggplotly(p2)
+```
+
+## 4. Plotting sentiments by date 
+```{r}
+sent %>% 
+  pivot_longer(starts_with("Sentiment_")) %>% 
+  filter(name != "Bert_emo_emotion_nan") %>% 
+  ggplot(aes(Date, value/n, color=name)) +  
+    geom_line() + 
+    geom_vline(xintercept = as.POSIXct(ymd("2020-02-11")), color = "red", linetype="dashed") +
+    geom_vline(xintercept = as.POSIXct(ymd("2020-12-16")), color = "red", linetype="dashed") 
+
+```
+
+## 5.PLotting the number of tweets by day
+```{r}
+sent %>% 
+  ggplot(aes(Date, n)) +  
+    geom_line() +   
+  geom_vline(xintercept = as.POSIXct(ymd("2020-02-11")), color = "red", linetype="dashed") +
+    geom_vline(xintercept = as.POSIXct(ymd("2020-12-16")), color = "red", linetype="dashed") 
+```
